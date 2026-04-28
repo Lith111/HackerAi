@@ -1,0 +1,185 @@
+
+# خطة تطوير الباك إند (Backend Development Plan)
+**التقنيات الأساسية:** Django 5.x, Django REST Framework (DRF), PostgreSQL
+**المبدأ:** بناء API قوي وآمن، يعتمد على مبدأ فصل الصلاحيات، مع محاكاة ذكية للتيرمنال عبر WebSockets.
+
+---
+
+## 1. الأدوات والمكتبات المرشحة (Tech Stack)
+
+| الفئة | المكتبة/الأداة | السبب |
+| :--- | :--- | :--- |
+| **لغة البرمجة والإطار** | Python 3.12+ , Django 5.x | هيكلية قوية، أمان عالي، إدارة مستخدمين مدمجة. |
+| **API** | Django REST Framework (DRF) | أفضل مكتبة لبناء REST APIs في Django، تدعم المصادقة والصلاحيات. |
+| **قاعدة البيانات** | PostgreSQL | أداء ممتاز، دعم للـ JSON Field (مفيد لتخزين سجلات التيرمنال). |
+| **المصادقة** | `djangorestframework-simplejwt` | نظام JWT آمن ومناسب لتطبيقات SPA (React). |
+| **التعامل مع CORS** | `django-cors-headers` | ضروري لاتصال واجهة React بالسيرفر. |
+| **الويب سوكيت (التيرمنال)** | **`Django Channels`** | لإنشاء اتصال WebSocket حي ولحظي مع التيرمنال. |
+| **طبقة التوجيه للـ Channels** | **`channels_rabbitmq`** أو `database-backed` | بديل عن Redis. استخدام RabbitMQ كطبقة خلفية هو خيار إنتاجي ممتاز، أو الاعتماد على قاعدة البيانات للطبقة الخلفية (أقل أداء لكنه مقبول للبداية). |
+| **التعامل مع مهام الخلفية** | **`Celery` + `RabbitMQ`** (أو `Django Q` بقاعدة البيانات) | لإرسال طلبات الذكاء الاصطناعي بشكل غير متزامن، ومنع حظر المتصفح. |
+| **الذكاء الاصطناعي** | `openai` (مكتبة Python الرسمية) | للاتصال الآمن بـ OpenAI API. |
+| **توثيق تلقائي للـ API** | `drf-spectacular` (OpenAPI 3) | لتوليد توثيق تلقائي لجميع نقاط النهاية. |
+| **التخزين المؤقت (اختياري)** | Django Cache Framework مع `DatabaseCache` أو `Memcached` | لتسريع تحميل بيانات الدروس والاختبارات دون Redis. |
+
+---
+
+## 2. هيكلة مشروع Django (Project Structure)
+
+```
+cyber_mentor/
+├── config/                   # إعدادات المشروع الرئيسية (settings, urls, asgi, wsgi)
+├── apps/
+│   ├── accounts/             # إدارة المستخدمين، JWT، الملفات الشخصية
+│   ├── courses/              # الدروس، الأقسام الأربعة، التسلسل
+│   ├── lab/                  # سيناريوهات التيرمنال، الأوامر، محاكاة WebSocket
+│   ├── ai/                   # تكامل الذكاء الاصطناعي، الشات بوت، المساعد المؤقت
+│   └── progress/             # المتابعة والتقارير
+├── utils/                    # دوال مساعدة مشتركة
+├── manage.py
+└── requirements.txt
+```
+جميع التطبيقات مسجلة في `INSTALLED_APPS` مع إعدادات `Django Channels` و `Celery`.
+
+---
+
+## 3. تصميم قاعدة البيانات (Database Schema Overview)
+
+الهدف هو تخزين كل شيء بطريقة تخدم منطق التسلسل والمحاكاة.
+
+- **`User` (نموذج Django المدمج ممتد):**
+    - `role`: حقل اختيار (`student`, `admin`).
+    - `learning_path`: حقل اختيار (`red_team`, `blue_team`).
+
+- **`Lesson` (جدول الدروس):**
+    - `title`, `slug`, `order` (للترتيب).
+    - `path` (مسار أحمر/أزرق).
+    - علاقة مع أربعة نماذج لكتل الدرس.
+
+- **`LessonBlock` (الكتل الأربعة):**
+    - `lesson` (ForeignKey).
+    - `block_type` (اختيار: `vulnerability_theory`, `exploit_code`, `defense_theory`, `secure_code`).
+    - `content` (TextField يدعم Markdown).
+    - `code_snippet` (TextField اختياري للكود، مع `language` لتحديد الصيغة).
+
+- **`StudentProgress` (تقدم الطالب):**
+    - `user`, `lesson` (مفتاح فريد معاً).
+    - `completed_blocks` (مصفوفة JSON تخزن أسماء الكتل المكتملة، مثلاً `["vulnerability_theory", "exploit_code"]`).
+    - `is_lesson_completed` (Boolean).
+
+- **`LabScenario` (سيناريو اختبار):**
+    - `title`, `path`.
+    - `context_prompt` (النص الذي يظهر للطالب في بداية التيرمنال).
+
+- **`LabCommand` (الأوامر الصحيحة):**
+    - `scenario` (ForeignKey).
+    - `input_pattern` (نمط Regex للأمر الصحيح).
+    - `expected_output` (الرد المتوقع عند النجاح).
+    - `order` (الترتيب لتحديد التسلسل).
+
+- **`TerminalSession` (جلسة التيرمنال - تستخدم مع WebSocket):**
+    - `user`, `scenario`, `started_at`.
+    - `current_step` (يتتبع أي أمر يتوقعه النظام).
+    - `command_log` (JSONField يخزن جميع الأوامر المدخلة والردود).
+    - `is_help_active` (Boolean للتحكم بحالة المساعدة المؤقتة).
+
+---
+
+## 4. توصيف نقاط النهاية (REST API Endpoints)
+
+### أ. إدارة المستخدمين والمصادقة (`accounts/`)
+- `POST /api/auth/register/` : تسجيل طالب جديد.
+- `POST /api/auth/login/` : تسجيل الدخول وإرجاع JWT.
+- `GET /api/auth/me/` : جلب بيانات المستخدم الحالي ومساره.
+
+### ب. الدروس والتقدم (`courses/` & `progress/`)
+- `GET /api/courses/` : قائمة الدروس المتاحة للمستخدم (مرتبة، مع حالة القفل/الإكمال).
+- `GET /api/courses/{slug}/` : تفاصيل الدرس مع كتله الأربعة التي يمكن الوصول إليها.
+- `POST /api/lessons/{id}/complete-block/` : تسجيل إكمال كتلة معينة.
+- `GET /api/progress/` : إحصائيات تقدم المستخدم الكلية (للوحة التحكم).
+
+### ج. المختبر (التيرمنال) (`lab/`)
+- `GET /api/lab/scenarios/` : سيناريوهات الاختبار المتاحة.
+- `POST /api/lab/scenarios/{id}/start/` : بدء جلسة جديدة (ينشئ `TerminalSession`).
+- **`WS /ws/terminal/{session_id}/`** : نقطة اتصال الـ WebSocket الأساسية. كل الاتصالات اللحظية تمر من هنا.
+
+### د. الذكاء الاصطناعي (`ai/`)
+- `POST /api/ai/chatbot/` : إرسال رسالة للشات بوت واستقبال الرد.
+- `POST /api/ai/request-help/` : طلب المساعدة المؤقتة داخل الاختبار (يتم استدعاؤه أيضاً عبر WebSocket، لكننا نحتاج نقطة REST منفصلة لإطلاق المهمة).
+
+---
+
+## 5. آلية عمل التيرمنال عبر WebSockets (القلب التقني)
+
+هذه هي أهم نقطة، وسنحققها كالتالي:
+
+1.  **بدء الجلسة:** عندما يبدأ الطالب الاختبار، يُنشأ كائن `TerminalSession` وتُحفظ حالته الأولية. يتم فتح اتصال WebSocket من React إلى `ws://domain/ws/terminal/{session_id}/`.
+
+2.  **استقبال الأوامر:** كل أمر يدخله الطالب يُرسل كرسالة JSON عبر WebSocket.
+    ```json
+    { "command": "nmap -sV target" }
+    ```
+
+3.  **معالجة الأمر في الخادم (Consumer):**
+    - يستقبل الـ `Consumer` الأمر.
+    - يسترجع `LabCommand` التالي المتوقع من قاعدة البيانات بناءً على `current_step`.
+    - يقارن الإدخال بنمط `input_pattern` (Regex).
+    - **إذا طابق:** يرد بردود JSON تحتوي على `output` (النص الذي سيظهر في التيرمنال) ويرفع `current_step` بمقدار 1.
+    - **إذا لم يطابق:** يرد بـ `output: "command not found"` ويثبت متغير `error_count`.
+
+4.  **تفعيل المساعدة المؤقتة (بدون Redis):**
+    - عند أول خطأ، يضيف الـ Consumer رسالة خاصة إلى الـ JSON: `{ "output": "command not found", "help_available": true }`.
+    - الواجهة تعرض "هل تريد المساعدة (Y/N)؟".
+    - إذا وافق المستخدم، ترسل الواجهة رسالة عبر نفس WebSocket: `{"action": "request_help"}` (أو يمكن أن يتم عبر نقطة REST لحجز المهمة).
+    - الـ Consumer في الخادم يستدعي مهمة **Celery** غير متزامنة: `send_help_to_ai.delay(session_id)`.
+    - المهمة تجمع `command_log` الكامل من الجلسة، ترسله لـ OpenAI API مع Prompt صارم، وتنتظر الرد.
+    - عند اكتمال المهمة، تقوم بتحديث حقل `ai_help_text` في الجلسة في قاعدة البيانات. ثم ترسل رسالة WebSocket للواجهة: `{"action": "show_help", "help_text": "الحل الصحيح هو..."}`.
+    - **إدارة الـ 10 ثواني:** تتم بالكامل في React (عداد تنازلي)، وبعد 10 ثواني ترسل الواجهة رسالة: `{"action": "reset_session"}`.
+    - الـ Consumer يستقبل "reset_session"، يقوم بتصفير `current_step`، يمسح `command_log`، ويحذف `ai_help_text`، ثم يرسل أمراً للواجهة بتنظيف شاشة التيرمنال.
+
+    **ملاحظة:** هذا الأسلوب يجعل إدارة الحالة مركزية في قاعدة البيانات دون الاعتماد على Redis، وهو آمن وقابل للتوسع مع RabbitMQ للـ Celery.
+
+---
+
+## 6. خطة أمان الباك إند (Security Plan)
+
+- **حماية مفاتيح API:** يوضع `OPENAI_API_KEY` و `SECRET_KEY` وبيانات قاعدة البيانات في ملف `.env` ولا يتم رفعها للمستودع أبداً.
+- **تحديد المعدل (Rate Limiting):** تطبيق `throttling` من DRF على نقاط نهاية الذكاء الاصطناعي لمنع الاستغلال المفرط.
+- **صلاحيات صارمة (Permissions):**
+    - `IsAuthenticated` على كل نقاط النهاية ما عدا العامة.
+    - صلاحيات مخصصة تمنع طالباً من رؤية بيانات طالب آخر أو تعديل الدروس.
+- **مكافحة Prompt Injection:** كما ذكرنا سابقاً، سيتم بناء `System Prompt` صارم جداً لنموذج الذكاء الاصطناعي، ويمنع أي سلوك خارج دوره.
+- **الاعتماد على جلسات Channels الآمنة:** يتم التحقق من المستخدم عبر `TokenAuthMiddleware` الخاص بـ Django Channels لضمان أن صاحب الجلسة هو نفسه المستخدم المتصل.
+
+---
+
+## 7. خطة التنفيذ المرحلية للباك إند (Implementation Phases)
+
+**المرحلة الأولى: الأساس (Foundation)**
+- إعداد مشروع Django و Django Channels.
+- إعداد PostgreSQL وتطبيق نموذج `User` الموسع.
+- تطبيق نظام JWT ونظام الصلاحيات (RBAC).
+- بناء `accounts` API بالكامل.
+
+**المرحلة الثانية: المحتوى التعليمي (Content Engine)**
+- بناء تطبيق `courses` ونماذج `Lesson` و `LessonBlock`.
+- بناء تطبيق `progress` ونموذج `StudentProgress`.
+- تطوير نقاط النهاية REST اللازمة لتسلسل الدروس، مع منطق التحقق من انتهاء الكتل.
+- بناء Admin مخصص للمدير لرفع المحتوى.
+
+**المرحلة الثالثة: محاكي التيرمنال (Lab Simulator)**
+- بناء تطبيق `lab` مع نماذج `LabScenario` و `LabCommand`.
+- برمجة الـ WebSocket Consumer بالمنطق الكامل (المطابقة، الأخطاء، المساعدة).
+- تكامل Celery مع RabbitMQ لمهام استدعاء الذكاء الاصطناعي.
+- اختبار جلسة كاملة وهمية للتأكد من إعادة التعيين.
+
+**المرحلة الرابعة: الذكاء الاصطناعي (AI Integration)**
+- بناء تطبيق `ai` مع الشات بوت ونموذج `ChatLog`.
+- كتابة الـ Prompts الهندسية المحكمة وتخزينها في إعدادات Django.
+- ربط مهام Celery بالرد على واجهة المستخدم عبر WebSocket.
+
+**المرحلة الخامسة: الاختبار والإطلاق (Testing & Launch)**
+- كتابة اختبارات شاملة لـ WebSocket والـ Consumers.
+- اختبار أمان كامل (OWASP Top 10).
+- إعداد بيئة الإنتاج باستخدام `Gunicorn` + `Daphne` (لـ Channels) + `Nginx`.
+- نشر أولي ومتابعة.
+
