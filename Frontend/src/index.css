@@ -1,24 +1,126 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
+/* إعدادات القاعدة (theme) */
+@theme {
+  /* الألوان المخصصة */
+  --color-cyber-cyan: #22d3ee;
+  --color-cyber-violet: #a78bfa;
+  --color-cyber-emerald: #34d399;
+  --color-cyber-rose: #f43f5e;
+  --color-dark-bg: #0f172a;
+  --color-dark-card: #1e293b;
+  --color-dark-border: #334155;
+
+  /* عائلات الخطوط */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'Fira Code', monospace;
+
+  /* تأثيرات ضبابية زجاجية */
+  --backdrop-blur-xs: 2px;
+
+  /* حركات مخصصة */
+  --animate-fall: fall linear infinite;
+  --animate-fade-in: fadeIn 0.6s ease-out forwards;
+
+  @keyframes fall {
+    0% { transform: translateY(-10%); opacity: 0; }
+    10% { opacity: 1; }
+    100% { transform: translateY(110vh); opacity: 0; }
+  }
+
+  @keyframes fadeIn {
+    0% { opacity: 0; transform: translateY(20px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* الطبقات المخصصة */
 @layer base {
+  html {
+    font-family: var(--font-sans);
+  }
   body {
-    @apply bg-gradient-to-br from-slate-50 to-gray-100 text-slate-800 antialiased;
-    font-family: 'Inter', sans-serif;
+    background-color: var(--color-dark-bg);
+    color: #f3f4f6; /* gray-100 */
+  }
+  /* إجبار النظام على المظهر الداكن (اختياري) */
+  :root {
+    color-scheme: dark;
   }
 }
 
 @layer components {
-  /* بطاقات زجاجية */
-  .glass-card {
-    @apply bg-white/70 backdrop-blur-xl border border-white/20 shadow-xl;
+  .glass {
+    background-color: rgb(255 255 255 / 0.05);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
   }
-  
-  /* تأثيرات تحويم */
-  .hover-lift {
-    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-lg;
+  .glass-hover {
+    transition: all 0.3s ease;
+  }
+  .glass-hover:hover {
+    background-color: rgb(255 255 255 / 0.1);
+    border-color: rgb(34 211 238 / 0.3);
+  }
+  .gradient-text {
+    background-image: linear-gradient(to right, var(--color-cyber-cyan), var(--color-cyber-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .btn-primary {
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    background-image: linear-gradient(to right, var(--color-cyber-cyan), var(--color-cyber-violet));
+    color: black;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    display: inline-block;
+    text-align: center;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 10px 15px -3px rgb(34 211 238 / 0.2);
+    transform: translateY(-2px);
+  }
+  .btn-outline {
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    border: 2px solid var(--color-cyber-cyan);
+    color: var(--color-cyber-cyan);
+    font-weight: 600;
+    transition: all 0.3s ease;
+    display: inline-block;
+    text-align: center;
+  }
+  .btn-outline:hover {
+    background-color: rgb(34 211 238 / 0.1);
+  }
+  .section-title {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 1rem;
+    background-image: linear-gradient(to right, var(--color-cyber-cyan), var(--color-cyber-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  @media (min-width: 768px) {
+    .section-title {
+      font-size: 3rem;
+      line-height: 1.2;
+    }
+  }
+  .section-subtitle {
+    color: #9ca3af;
+    font-size: 1.125rem;
+    max-width: 42rem;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
   }
 }
